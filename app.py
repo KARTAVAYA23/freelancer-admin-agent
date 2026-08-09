@@ -14,6 +14,7 @@ from pathlib import Path
 import streamlit as st
 
 AUDIO_FILE = Path(__file__).parent / "ma-ka-bhosda-aag.mp3"
+SHOCKED_AUDIO_FILE = Path(__file__).parent / "shocked-sound-effect.mp3"
 
 
 def play_first_audio():
@@ -32,6 +33,23 @@ def play_first_audio():
                 )
             except Exception:
                 pass
+
+
+def play_output_sound():
+    if SHOCKED_AUDIO_FILE.exists():
+        try:
+            st.audio(str(SHOCKED_AUDIO_FILE), autoplay=True)
+            with open(SHOCKED_AUDIO_FILE, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+            st.markdown(
+                f'<audio autoplay style="display:none">'
+                f'<source src="data:audio/mp3;base64,{b64}" type="audio/mp3">'
+                f'</audio>',
+                unsafe_allow_html=True
+            )
+        except Exception:
+            pass
+
 
 import agents
 import config
@@ -341,6 +359,10 @@ for index, message in enumerate(st.session_state.messages):
         if artifact and artifact.get("kind") != "discarded":
             render_artifact(artifact, str(index))
 
+if st.session_state.get("play_shocked", False):
+    play_output_sound()
+    st.session_state.play_shocked = False
+
 
 # ─────────────────────────── handlers ───────────────────────────
 
@@ -640,4 +662,5 @@ if prompt:
         say("assistant", f"That didn't work: `{exc}`")
         reset_flow()
 
+    st.session_state.play_shocked = True
     st.rerun()
