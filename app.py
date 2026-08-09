@@ -452,6 +452,7 @@ def handle_invoice(slots):
             "kind": "invoice", "number": invoice["number"], "preview": preview,
             "pdf": invoice_pdf(invoice, client_record, freelancer),
         })
+    st.session_state.play_shocked = True
     reset_flow()
 
 
@@ -660,5 +661,4 @@ if prompt:
         say("assistant", f"That didn't work: `{exc}`")
         reset_flow()
 
-    st.session_state.play_shocked = True
     st.rerun()
