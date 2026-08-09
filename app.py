@@ -4,7 +4,8 @@ Single entry point:  streamlit run app.py
 
 One conversational surface. The router picks an agent, the agent fills slots by
 asking, and output lands as a downloadable document or a confirm-gated email.
-"""import base64
+"""
+import base64
 import html
 import re
 from datetime import date, timedelta
