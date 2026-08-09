@@ -4,13 +4,33 @@ Single entry point:  streamlit run app.py
 
 One conversational surface. The router picks an agent, the agent fills slots by
 asking, and output lands as a downloadable document or a confirm-gated email.
-"""
-
+"""import base64
 import html
 import re
 from datetime import date, timedelta
+from pathlib import Path
 
 import streamlit as st
+
+AUDIO_FILE = Path(__file__).parent / "ma-ka-bhosda-aag.mp3"
+
+
+def play_first_audio():
+    if not st.session_state.get("audio_played", False):
+        st.session_state.audio_played = True
+        if AUDIO_FILE.exists():
+            try:
+                st.audio(str(AUDIO_FILE), autoplay=True)
+                with open(AUDIO_FILE, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                st.markdown(
+                    f'<audio autoplay style="display:none">'
+                    f'<source src="data:audio/mp3;base64,{b64}" type="audio/mp3">'
+                    f'</audio>',
+                    unsafe_allow_html=True
+                )
+            except Exception:
+                pass
 
 import agents
 import config
@@ -29,7 +49,6 @@ from theme import CSS, masthead, stat_strip
 
 st.set_page_config(page_title="Freelance Admin Desk", page_icon="🖋", layout="centered")
 st.markdown(theme.CSS, unsafe_allow_html=True)
-
 
 
 # ─────────────────────────── startup gate ───────────────────────────
@@ -69,6 +88,7 @@ def init_state():
         "artifacts": {},        # message index -> artifact dict
         "artifact_seq": 0,
         "greeted": False,
+        "audio_played": False,
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -579,6 +599,7 @@ def handle_status(slots):
 prompt = st.chat_input("Describe what you need…")
 
 if prompt:
+    play_first_audio()
     say("user", prompt)
 
     with st.spinner("Reading…"):
