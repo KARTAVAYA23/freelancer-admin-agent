@@ -1,0 +1,172 @@
+You are building a Python-only, Streamlit-based "Freelancer Admin Agent" — a conversational
+chatbot that drafts client proposals, generates invoices, and sends payment reminders by Gmail.
+
+GOAL
+Create a runnable Streamlit app with a single chat interface. The freelancer types what they
+need in natural language; the app routes to the right agent, collects missing details through
+conversation, and produces a downloadable document or a sent email. All agent behaviour must
+come from markdown specification files injected into the system prompt — not from hardcoded
+Python strings.
+
+---
+
+HARD REQUIREMENTS
+
+1) Python only. Streamlit UI. Single entry point: `streamlit run app.py`.
+
+2) Credentials live in a `.env` file in the project root, loaded with python-dotenv:
+     OPENAI_API_KEY      — required; app shows a styled error and stops if blank
+     GMAIL_SENDER        — freelancer's Gmail address
+     GMAIL_APP_PASS      — 16-character Gmail App Password, never the account password
+     FREELANCER_NAME / FREELANCER_EMAIL / FREELANCER_PHONE
+   Never hardcode a credential in source. Never print one to the UI.
+
+3) Agent behaviour is defined in markdown files in `skills/`, read FRESH FROM DISK on every
+   turn — never cached at import:
+     agent-rules.md             global rules, injected into every turn, all agents
+     intent-router-skill.md     classification and slot extraction
+     proposal-agent-skill.md    proposal role card
+     invoice-agent-skill.md     invoice role card
+     reminder-agent-skill.md    reminder role card + tone tiers
+     data-manager-skill.md      storage query role card
+   Exactly THREE files load per turn: global rules + router + ONE role card. Role cards are
+   mutually exclusive. Strip the YAML frontmatter before injecting — it is metadata, not
+   instruction. Editing a role card must change behaviour on the next message with no restart.
+
+4) INTENT DETECTION. Classify every message into exactly one of six intents:
+   PROPOSAL, INVOICE, REMINDER, QUERY, STATUS_UPDATE, CHITCHAT.
+   Use a keyword prefilter for unambiguous phrasings ("mark invoice #1042 as paid",
+   "what's unpaid"), and an LLM call in JSON mode for everything else. The classifier returns
+   {intent, confidence, slots, reasoning}. A message answering a pending follow-up question
+   inherits the open intent — a bare "BrightLeaf" replying to "who's the client?" is never
+   CHITCHAT.
+
+5) SLOT FILLING. When a required slot is missing, ask for ONE thing per turn, phrased like a
+   person, shaped by what the freelancer just said. Never emit a list of form fields. Never
+   re-ask for a slot already collected. Once all required slots are filled, generate — do not
+   chase optional slots.
+
+6) FEATURE 1 — PROPOSAL GENERATOR.
+   Required slots: client_name, project_title, project_description, deliverables, timeline,
+   freelancer_name. Optional: budget/rate, freelancer_background.
+   Output exactly eight sections, in order, every time:
+     Introduction · Project Understanding · Proposed Approach · Deliverables ·
+     Timeline · Pricing · Terms · Closing
+   With no budget supplied, the Pricing section reads "Pricing to be discussed based on final
+   scope." Never drop the section, never invent a figure.
+   Register must match the project type — a logo identity proposal and a backend integration
+   proposal must not read like the same document with nouns swapped. Build a register table
+   (brand / web / content / marketing / consulting / video) into the role card.
+   600–900 words. Preview in chat, downloadable as PDF and DOCX.
+
+7) FEATURE 2 — INVOICE GENERATOR.
+   Required slots: client_name, project_name, work_items (description + hours + rate),
+   payment_details. Optional: tax_rate, notes.
+   ALL ARITHMETIC IS COMPUTED IN PYTHON, NEVER BY THE LLM. Use Decimal with ROUND_HALF_UP
+   quantized to 2 places at every step — not once at the end. Floats are forbidden for
+   currency. The model writes only the notes field.
+     line subtotal = hours × rate
+     subtotal      = Σ line subtotals
+     tax_amount    = subtotal × (tax_rate / 100)
+     total         = subtotal + tax_amount
+   Invoice numbers are sequential from 1001, derived from the highest number in storage so a
+   hand-edited data file cannot produce a duplicate. Custom overrides allowed; collisions
+   rejected with the conflicting invoice shown. Due date defaults to issue + 15 days.
+   Status is `unpaid` on creation, always. Preview in chat, downloadable as PDF.
+
+8) FEATURE 3 — PAYMENT REMINDER + GMAIL SEND.
+   Tone tier is computed in PYTHON from (today − due_date).days and passed to the model as a
+   fact. The model must not choose or reassess the tier:
+     1–7 days   → GENTLE  warm, assumes it was forgotten, no deadline, no consequence
+     8–21 days  → FIRM    direct, states days overdue, asks for a specific payment date
+     22+ days   → URGENT  professional, states one concrete consequence, gives a deadline
+   Every reminder contains: personalised greeting, invoice number, amount outstanding,
+   original due date, exact days overdue, payment request, payment details, freelancer
+   sign-off with contact details.
+   If prior reminders exist for the invoice, reference that history — never write a second
+   reminder as though it were the first.
+   SEND FLOW, no step skippable:
+     generate draft → render in chat UNSENT → freelancer may edit → freelancer clicks
+     "Send via Gmail" → smtplib STARTTLS on smtp.gmail.com:587 → log to storage with tier,
+     timestamp, recipient, subject, body.
+   "Yes, send it" typed in chat is intent, not authorisation. The button is the only send path.
+   Every SMTP failure returns (False, human-readable message) — never a traceback, and never a
+   false "sent" confirmation.
+
+9) FEATURE 4 — QUERIES AND STATUS TRACKING.
+   "What's still unpaid?" → every unpaid invoice, sorted most-overdue-first, WITH A TOTAL.
+   "Show me everything for BrightLeaf" → proposals, invoices, reminders for that client.
+   "Mark invoice #1042 as paid" → status update, naming the invoice back so a wrong guess is
+   caught immediately.
+   Statuses: unpaid · paid · cancelled. `overdue` is DERIVED at read time
+   (status == unpaid and due_date < today), never stored — stored state goes stale at midnight.
+   Cancelled invoices are excluded from totals but never deleted; gaps in numbering look like
+   destroyed records.
+
+10) STORAGE. Single JSON file `storage/data.json`, keyed by slugified client name so "Acme
+    Corp", "acme corp", and "ACME Corp." resolve to one record. Every write atomic: temp file
+    in the same directory, then os.replace. A half-written data.json loses every client.
+    Structure: clients → { name, email, company, phone, projects[], proposals[], invoices[],
+    reminders[] } plus meta → { last_invoice_number, freelancer{} }.
+
+11) GROUNDING — no hallucination on client-facing documents.
+    Never invent client company details, the freelancer's credentials or past clients, or any
+    number. Every figure traces to a filled slot or a computed field. When a detail is missing
+    and structurally required, emit a visible `[ ]` placeholder — a visible gap is recoverable,
+    an invented fact discovered by the client is not.
+    Never expose chain-of-thought, planning, or <thinking> blocks in the UI.
+
+---
+
+UI / UX REQUIREMENTS
+
+Aesthetic: an accounting ledger — warm, editorial, printed. Not default SaaS blue-on-white.
+- Fonts: Fraunces (display serif, headings), Karla (body/UI), JetBrains Mono (all figures).
+- Palette: warm paper #F7F4ED, ink #1A1815, oxblood accent #8C2F2F, ledger green #2D5A4A,
+  amber #B8792B, rules #E2DACA. Define them as CSS variables.
+- Background carries faint horizontal ruled lines, like ledger paper.
+- Masthead with a heavy top rule, a monospaced uppercase kicker, and a serif headline.
+- A stat strip under the masthead: clients · outstanding · overdue · paid, monospaced figures.
+- Proposal preview in a card with an oxblood left border; reminder drafts in a card with an
+  amber left border; invoice previews and tables in a monospaced ledger block.
+- Tone tier shown as a coloured chip on every reminder draft: green/amber/oxblood.
+- Sidebar: freelancer details, Gmail status pill (READY / NOT SET) with a test-connection
+  button, and a live outstanding-invoice list with a total.
+- Staggered fade-and-rise entrance animation on page load. Respect prefers-reduced-motion.
+- Download buttons appear inline under the generated artifact, not in a separate panel.
+- No emoji avatars, no spinners exposing model internals, no chain-of-thought.
+
+---
+
+FILE LAYOUT
+
+  app.py          Streamlit UI, session state, handlers, artifact rendering
+  agents.py       skill-file loading, system prompt assembly, LLM calls, tone_tier()
+  intent.py       keyword prefilter, LLM classification, slot coercion and merging
+  storage.py      atomic JSON persistence, slugs, invoice numbering, status derivation
+  documents.py    Decimal arithmetic, invoice PDF, proposal PDF + DOCX (ReportLab, python-docx)
+  mailer.py       Gmail SMTP with typed error messages
+  config.py       .env loading and validation
+  theme.py        CSS and layout fragments
+  skills/*.md     the six agent specification files
+  .env            blank credential fields
+  requirements.txt
+
+---
+
+ACCEPTANCE CRITERIA
+
+- `streamlit run app.py` is the only entry point and runs without errors.
+- Blank OPENAI_API_KEY → styled error naming the file and field, app stops.
+- Missing skills/*.md → styled error naming the missing files, app stops.
+- Gmail checked lazily: proposals and invoices work with Gmail unconfigured.
+- Every proposal has all eight sections in order, including Pricing when no budget was given.
+- Invoice arithmetic is exact: 12.5h × $85 + 3.25h × $85 + 1h × $120 at 7.5% tax
+  = subtotal $1,458.75, tax $109.41, total $1,568.16.
+- Tone tier boundaries are exact: 7→gentle, 8→firm, 21→firm, 22→urgent.
+- No email sends without a button press.
+- Invoice numbers never collide, even across a hand-edited data.json.
+- Data survives restart.
+- Editing skills/reminder-agent-skill.md changes the next reminder with no restart.
+
+Now generate the complete codebase. Every file complete, no placeholders, no TODOs.
