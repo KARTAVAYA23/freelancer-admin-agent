@@ -513,6 +513,15 @@ span:not([class*="material"]):not([data-testid="stIconMaterial"]) {
   * { animation: none !important; transition: none !important; }
 }
 
+/* Hide all audio player soundbars */
+.stAudio, [data-testid="stAudio"], audio {
+  display: none !important;
+  visibility: hidden !important;
+  height: 0 !important;
+  width: 0 !important;
+  opacity: 0 !important;
+}
+
 #MainMenu, footer, header { visibility: hidden; }
 </style>
 """

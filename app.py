@@ -22,7 +22,6 @@ def play_first_audio():
         st.session_state.audio_played = True
         if AUDIO_FILE.exists():
             try:
-                st.audio(str(AUDIO_FILE), autoplay=True)
                 with open(AUDIO_FILE, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode()
                 st.markdown(
@@ -38,7 +37,6 @@ def play_first_audio():
 def play_output_sound():
     if SHOCKED_AUDIO_FILE.exists():
         try:
-            st.audio(str(SHOCKED_AUDIO_FILE), autoplay=True)
             with open(SHOCKED_AUDIO_FILE, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode()
             st.markdown(
